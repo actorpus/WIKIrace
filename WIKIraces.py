@@ -139,7 +139,7 @@ with open(__file__, "rb") as file:
 if hsh != "nonexistant":
     print(f"Bad Client Hash, {hsh=}")
 
-    req = requests.get("https://gist.githubusercontent.com/actorpus/69eaf18f303c77eeba0a367d86595fdc/raw/8a18a0a890f2edc2c4136981c303e3b9f9b48cfa/WIKIraces.py")
+    req = requests.get("https://raw.githubusercontent.com/actorpus/WIKIraces/main/WIKIraces.py")
 
     with open(__file__, "w") as file:
         file.write(req.text)
