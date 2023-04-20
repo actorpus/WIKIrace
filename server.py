@@ -33,13 +33,18 @@ class Client(threading.Thread):
         self.daemon = True
 
     def start_message(self, start, end):
+        t = RequestTimefromNtp()
+
+        print("time were sending is", t + 30)
+
         self.sock.send(json.dumps({
             "start_point": start,
             "end_point": end,
-            "start_time": RequestTimefromNtp() + 60
+            "start_time": t + 30
         }).encode())
 
     def broadcast_win(self, winning_path):
+        print("sending win packet for", self.name)
         self.sock.send(json.dumps({
             "gameover": 1,
             "path": winning_path

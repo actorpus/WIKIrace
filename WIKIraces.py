@@ -29,8 +29,7 @@ def RequestTimefromNtp(addr='0.de.pool.ntp.org'):
     if data:
         t = struct.unpack('!12I', data)[10]
         t -= REF_TIME_1970
-    else:
-        t = int(time.time())
+
     return t
 
 
@@ -97,6 +96,8 @@ class WFW(threading.Thread):
                 data = self.sock.recv(16_384)
 
             data = json.loads(data)
+
+            print(data)
 
             if "gameover" in data:
                 self.gameover = True
@@ -212,7 +213,8 @@ def main():
 
     print("Forcing page update, waiting for game to start")
     page = render("Waiting for game to start",
-                  "When the game starts you will be shown a preview of your target<br>Then as soon as the first page loads your off!")
+                  "When the game starts you will be shown a preview of your target<br>"
+                  "Then as soon as the first page loads your off!")
     driver.get(page)
 
     data = ""
@@ -238,9 +240,11 @@ def main():
 
     print("starting second thread")
     wfw = WFW(client_socket)
+    wfw.start()
 
     print("Requesting time")
     current_time = RequestTimefromNtp()
+    print("Time from server", current_time)
     print("Waiting for start time! approx", start_time - current_time, "seconds")
     time.sleep(start_time - current_time)
 
@@ -284,7 +288,7 @@ def main():
             driver.get(page)
 
     if wfw.gameover:
-        page = render("L", "Looser, the winner took this path <br><br>" + "<br>".join(wfw.path))
+        page = render("Wayyyy... you loose", "the winner took this path <br><br>" + "<br>".join([t.split("/wiki/")[1].replace("_", " ") for t in wfw.path]))
         driver.get(page)
         time.sleep(30)
         driver.close()
