@@ -18,10 +18,11 @@ except ModuleNotFoundError:
 from selenium import webdriver
 from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 
+REF_TIME_1970 = 2208988800
+
 
 # https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
-def RequestTimefromNtp(addr='0.de.pool.ntp.org'):
-    REF_TIME_1970 = 2208988800  # Reference time
+def request_time_from_ntp(addr='0.de.pool.ntp.org'):
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     data = b'\x1b' + 47 * b'\0'
     client.sendto(data, (addr, 123))
@@ -68,7 +69,7 @@ def render(heading, content):
         background-color: rgb(220 220 220);
     }
 </style>
-<div><h1>WIKI races</h1>
+<div><h1>WIKIRace's</h1>
     <h2>{{ heading }}</h2>
     <p>{{ content }}</p>
 </div>
@@ -138,7 +139,7 @@ def main():
     }
 </style>
 <div>
-    <h1>WIKI races</h1>
+    <h1>WIKIRace's</h1>
     <form style="align-content: center" action="http://local/">
         <table>
             <tr>
@@ -243,7 +244,7 @@ def main():
     wfw.start()
 
     print("Requesting time")
-    current_time = RequestTimefromNtp()
+    current_time = request_time_from_ntp()
     print("Time from server", current_time)
     print("Waiting for start time! approx", start_time - current_time, "seconds")
     time.sleep(start_time - current_time)
@@ -265,7 +266,6 @@ def main():
     path = [page]
 
     while (current != end) and not wfw.gameover:
-        # current = wait_for_change(driver, page)
         while not wfw.gameover:
             time.sleep(0.1)
 
@@ -288,7 +288,10 @@ def main():
             driver.get(page)
 
     if wfw.gameover:
-        page = render("Wayyyy... you loose", "the winner took this path <br><br>" + "<br>".join([t.split("/wiki/")[1].replace("_", " ") for t in wfw.path]))
+        page = render("Wayyyy... you loose", "the winner took this path <br><br>" + "<br>".join(
+            [t.split("/wiki/")[1].replace("_", " ") for t in wfw.path])
+        )
+
         driver.get(page)
         time.sleep(30)
         driver.close()
@@ -307,15 +310,23 @@ def main():
 
 
 print("Checking client hash...")
-with open(__file__, "rb") as file: hsh = hashlib.sha1(file.read()).hexdigest()
-phsh = requests.get("https://raw.githubusercontent.com/actorpus/WIKIraces/main/client_hash").text.strip()
-if hsh != phsh:
-    print(f"Bad Client Hash, {hsh=} {phsh=}")
+
+with open(__file__, "rb") as file:
+    local_hash = hashlib.sha1(file.read()).hexdigest()
+
+remote_hash = requests.get("https://raw.githubusercontent.com/actorpus/WIKIraces/main/client_hash").text.strip()
+
+if local_hash != remote_hash:
+    print(f"Bad Client Hash, {local_hash=} {remote_hash=}")
     req = requests.get("https://raw.githubusercontent.com/actorpus/WIKIraces/main/WIKIraces.py")
-    with open(__file__, "w") as file: file.write(req.text)
+
+    with open(__file__, "w") as file:
+        file.write(req.text)
+
     sys.exit()
+
 else:
-    print("Client chilling")
+    print("Client chilling, continuing as usual")
 
 if __name__ == '__main__':
     main()
