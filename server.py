@@ -3,6 +3,23 @@ import random
 import socket
 import threading
 import time
+import os
+import struct
+
+
+# https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
+def RequestTimefromNtp(addr='0.de.pool.ntp.org'):
+    REF_TIME_1970 = 2208988800  # Reference time
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    data = b'\x1b' + 47 * b'\0'
+    client.sendto(data, (addr, 123))
+    data, address = client.recvfrom(1024)
+    if data:
+        t = struct.unpack('!12I', data)[10]
+        t -= REF_TIME_1970
+    else:
+        t = int(time.time())
+    return t
 
 
 class Client(threading.Thread):
@@ -18,7 +35,8 @@ class Client(threading.Thread):
     def start_message(self, start, end):
         self.sock.send(json.dumps({
             "start_point": start,
-            "end_point": end
+            "end_point": end,
+            "start_time": RequestTimefromNtp() + 60
         }).encode())
 
     def broadcast_win(self, winning_path):
@@ -62,8 +80,8 @@ class Client(threading.Thread):
 
 ip, port = socket.gethostbyname(socket.gethostname()), 37126
 server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_sock.bind((ip, port))
-server_sock.listen(8)
+server_sock.bind(("", port))
+server_sock.listen(64)
 print(f"server running on {ip}:{port}")
 
 

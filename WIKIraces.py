@@ -1,3 +1,4 @@
+import threading
 import requests
 import hashlib
 import time
@@ -5,6 +6,7 @@ import json
 import socket
 import sys
 import os
+import struct
 
 try:
     import selenium
@@ -15,6 +17,21 @@ except ModuleNotFoundError:
 
 from selenium import webdriver
 from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
+
+
+# https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
+def RequestTimefromNtp(addr='0.de.pool.ntp.org'):
+    REF_TIME_1970 = 2208988800  # Reference time
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    data = b'\x1b' + 47 * b'\0'
+    client.sendto(data, (addr, 123))
+    data, address = client.recvfrom(1024)
+    if data:
+        t = struct.unpack('!12I', data)[10]
+        t -= REF_TIME_1970
+    else:
+        t = int(time.time())
+    return t
 
 
 def wait_for_change(driver, from_url):
@@ -33,26 +50,127 @@ def wait_for_change(driver, from_url):
 
 
 def render(heading, content):
-    return f'data:text/html,<div style="padding: 32px; border: black 1px solid; position: absolute; left: 50%; ' \
-           f'top: 50%; transform: translate(-50%, -50%)"><h1>WIKI races</h1><h2>{heading}</h2><p>{content}</p></div>'
+    return """data:text/html,
+<style>
+    div {
+        padding: 32px;
+        background-color: white;
+        border: black 1px solid;
+        border-radius: 8px;
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%)
+    }
+    h1 {
+        margin: 0 0 8px 0;
+    }
+    body {
+        background-color: rgb(220 220 220);
+    }
+</style>
+<div><h1>WIKI races</h1>
+    <h2>{{ heading }}</h2>
+    <p>{{ content }}</p>
+</div>
+""".replace("{{ heading }}", heading). \
+        replace("{{ content }}", content). \
+        replace("\r\n", ""). \
+        replace("\n", ""). \
+        replace("    ", "")
+
+
+class WFW(threading.Thread):
+    def __init__(self, sock):
+        super(WFW, self).__init__()
+
+        self.sock = sock
+        self.gameover = False
+        self.path = []
+
+        self.deamon = True
+
+    def run(self) -> None:
+        while True:
+            data = b""
+            while not data:
+                data = self.sock.recv(16_384)
+
+            data = json.loads(data)
+
+            if "gameover" in data:
+                self.gameover = True
+                self.path = data["path"]
 
 
 def main():
+    print("Finding and binding baby")
     binary = FirefoxBinary(r"C:\Program Files\Mozilla Firefox\firefox.exe")
 
     driver = webdriver.Firefox(firefox_binary=binary)
 
+    print("Forcing page update, login")
     default = """
-<div style="padding: 32px; border: black 1px solid; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%)">
+<style>
+    body {
+        background-color: rgb(220 220 220);
+    }
+
+    h1 {
+        margin: 0 0 8px 0;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    div {
+        padding: 32px;
+        background-color: white;
+        border: black 1px solid;
+        border-radius: 8px;
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%)
+    }
+</style>
+<div>
     <h1>WIKI races</h1>
     <form style="align-content: center" action="http://local/">
-        <label for="server">Server IP:</label>
-        <input type="text" name="server" id="server" placeholder="192.168.56.7" value="192.168."><br>
-        <label for="port">Server Port:</label>
-        <input type="text" name="port" id="port" placeholder="37126" value="37126"><br>
-        <label for="name">Name:</label>
-        <input type="text" name="name" id="name" placeholder="Joe"><br>
-        <button type="submit">Submit</button>
+        <table>
+            <tr>
+                <td>
+                    <label for="server">Server IP:</label>
+                </td>
+                <td>
+                    <input type="text" name="server" id="server" placeholder="192.168.56.7" value="169.254.217.82"><br>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <label for="port">Server Port:</label>
+                </td>
+                <td>
+                    <input type="text" name="port" id="port" placeholder="37126" value="37126"><br>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <label for="name">Name:</label>
+                </td>
+                <td>
+                    <input type="text" name="name" id="name" placeholder="Joe"><br>
+                </td>
+            </tr>
+            <tr>
+                <td></td>
+                <td>
+                    <button type="submit">Submit</button>
+                </td>
+            </tr>
+        </table>
     </form>
 </div>
 """.replace("\r\n", "").replace("\n", "").replace("    ", "")
@@ -65,6 +183,7 @@ def main():
 
     server, port, name = [_.split("=")[1] for _ in new_page.split("http://local/?")[1].split("&")]
 
+    print("Forcing page update, waiting for server")
     page = render("Please wait for the server to acknowledge your existence", f"connecting to {server}:{port}")
     driver.get(page)
 
@@ -91,7 +210,9 @@ def main():
         driver.close()
         sys.exit(-1)
 
-    page = render("Waiting for game to start", "When the game starts you will be shown a preview of your target<br>Then as soon as the first page loads your off!")
+    print("Forcing page update, waiting for game to start")
+    page = render("Waiting for game to start",
+                  "When the game starts you will be shown a preview of your target<br>Then as soon as the first page loads your off!")
     driver.get(page)
 
     data = ""
@@ -102,19 +223,31 @@ def main():
 
     start = data["start_point"]
     end = data["end_point"]
+    start_time = data["start_time"]
 
-    page = render("Loading target preview...", "Navigating around this page is pointless")
-    driver.get(page)
-    time.sleep(2)
-
-    page = f"https://en.wikipedia.org/wiki/Special:Search?search={end['article'].replace(' ', '_')}"
+    print("Forcing page update, pre-game")
+    page = render("The game is about to begin", "Give the following page a good read, it is your target page")
     driver.get(page)
     time.sleep(10)
 
+    print("Forcing page update, search, endpoint")
+    page = f"https://en.wikipedia.org/wiki/Special:Search?search={end['article'].replace(' ', '_')}"
+    driver.get(page)
+    time.sleep(5)
     end = driver.current_url
+
+    print("starting second thread")
+    wfw = WFW(client_socket)
+
+    print("Requesting time")
+    current_time = RequestTimefromNtp()
+    print("Waiting for start time! approx", start_time - current_time, "seconds")
+    time.sleep(start_time - current_time)
+
+    print("Forcing page update, game pretence")
     page = render("Prepare to start the game", "it will begin shortly")
     driver.get(page)
-    time.sleep(2)
+    time.sleep(5)
 
     page = f"https://en.wikipedia.org/wiki/Special:Search?search={start['article'].replace(' ', '_')}"
     driver.get(page)
@@ -127,8 +260,21 @@ def main():
 
     path = [page]
 
-    while current != end:
-        current = wait_for_change(driver, page)
+    while (current != end) and not wfw.gameover:
+        # current = wait_for_change(driver, page)
+        while not wfw.gameover:
+            time.sleep(0.1)
+
+            new_page = driver.current_url
+            if new_page == page:
+                continue
+
+            if new_page == "about:blank":
+                continue
+
+            current = new_page
+            break
+
         page = driver.current_url
 
         path.append(page)
@@ -137,17 +283,23 @@ def main():
             page = start
             driver.get(page)
 
-    # driver.get("data:text/html,<h1>You Win</h1>")
-    page = render("Congratulations! You win", "let us just inform the others...")
-    driver.get(page)
+    if wfw.gameover:
+        page = render("L", "Looser, the winner took this path <br><br>" + "<br>".join(wfw.path))
+        driver.get(page)
+        time.sleep(30)
+        driver.close()
 
-    client_socket.send(b"WIN")
-    time.sleep(1)
-    client_socket.send(json.dumps(path).encode())
+    else:
+        page = render("Congratulations! You win", "let us just inform the others...")
+        driver.get(page)
 
-    time.sleep(5)
+        client_socket.send(b"WIN")
+        time.sleep(1)
+        client_socket.send(json.dumps(path).encode())
 
-    driver.close()
+        time.sleep(5)
+
+        driver.close()
 
 
 print("Checking client hash...")
