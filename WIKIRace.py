@@ -1,3 +1,19 @@
+__author__ = "actorp.us#7755"
+__version__ = "1.16"
+__licence__ = "CC BY-NC-SA 4.0"
+
+#
+# This work is licenced under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+#
+# This license requires that reusers give credit to the creator. It allows reusers to distribute, remix,
+# adapt, and build upon the material in any medium or format, for noncommercial purposes only. If others
+# modify or adapt the material, they must license the modified material under identical terms.
+# see more at https://creativecommons.org/licenses/by-nc-sa/4.0/
+#
+# official page for this project is https://github.com/actorpus/WIKIRace
+#
+
+
 import threading
 import requests
 import hashlib
@@ -18,17 +34,20 @@ except ModuleNotFoundError:
 from selenium import webdriver
 from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 
+DEBUG_MODE = False
+UPDATE_SERVER = "https://raw.githubusercontent.com/actorpus/WIKIrace/main/"
+LOCAL_PATH = sys.path[0].replace("\\", "/")
 REF_TIME_1970 = 2208988800
 
 
 # https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
-def request_time_from_ntp(addr='0.de.pool.ntp.org'):
+def request_time_from_ntp(addr="0.de.pool.ntp.org"):
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     data = b'\x1b' + 47 * b'\0'
     client.sendto(data, (addr, 123))
     data, address = client.recvfrom(1024)
     if data:
-        t = struct.unpack('!12I', data)[10]
+        t = struct.unpack("!12I", data)[10]
         t -= REF_TIME_1970
 
     return t
@@ -36,22 +55,27 @@ def request_time_from_ntp(addr='0.de.pool.ntp.org'):
 
 def wait_for_change(driver, from_url):
     page = from_url
+    if DEBUG_MODE: print("looking for deviations from", page)
+
     while True:
-        time.sleep(0.1)
+        time.sleep(1)
 
         new_page = driver.current_url
+        if DEBUG_MODE: print("looking at", new_page)
+
         if new_page == page:
             continue
 
         if new_page == "about:blank":
             continue
 
+        if DEBUG_MODE: print("deviation detected")
+
         return new_page
 
 
-def render(heading, content):
-    return """data:text/html,
-<style>
+def render_templated(heading, content):
+    web_page = """<style>
     div {
         padding: 32px;
         background-color: white;
@@ -69,7 +93,7 @@ def render(heading, content):
         background-color: rgb(220 220 220);
     }
 </style>
-<div><h1>WIKIRace's</h1>
+<div><h1>WIKIRace</h1>
     <h2>{{ heading }}</h2>
     <p>{{ content }}</p>
 </div>
@@ -79,40 +103,14 @@ def render(heading, content):
         replace("\n", ""). \
         replace("    ", "")
 
+    with open(f"{LOCAL_PATH}/WIKIRaceRenderer.temp.html", "w") as file:
+        file.write(web_page)
 
-class WFW(threading.Thread):
-    def __init__(self, sock):
-        super(WFW, self).__init__()
-
-        self.sock = sock
-        self.gameover = False
-        self.path = []
-
-        self.deamon = True
-
-    def run(self) -> None:
-        while True:
-            data = b""
-            while not data:
-                data = self.sock.recv(16_384)
-
-            data = json.loads(data)
-
-            print(data)
-
-            if "gameover" in data:
-                self.gameover = True
-                self.path = data["path"]
+    return f"file:///{LOCAL_PATH}/WIKIRaceRenderer.temp.html"
 
 
-def main():
-    print("Finding and binding baby")
-    binary = FirefoxBinary(r"C:\Program Files\Mozilla Firefox\firefox.exe")
-
-    driver = webdriver.Firefox(firefox_binary=binary)
-
-    print("Forcing page update, login")
-    default = """
+def render_login():
+    web_page = """
 <style>
     body {
         background-color: rgb(220 220 220);
@@ -139,8 +137,8 @@ def main():
     }
 </style>
 <div>
-    <h1>WIKIRace's</h1>
-    <form style="align-content: center" action="http://local/">
+    <h1>WIKIRace</h1>
+    <form style="align-content: center">
         <table>
             <tr>
                 <td>
@@ -177,24 +175,69 @@ def main():
 </div>
 """.replace("\r\n", "").replace("\n", "").replace("    ", "")
 
-    page = f"data:text/html,{default}"
+    with open(f"{LOCAL_PATH}\\WIKIRaceRenderer.temp.html", "w") as file:
+        file.write(web_page)
+
+    return f"file:///{LOCAL_PATH}/WIKIRaceRenderer.temp.html"
+
+
+class WFW(threading.Thread):
+    def __init__(self, sock):
+        super(WFW, self).__init__()
+
+        self.sock = sock
+        self.gameover = False
+        self.path = []
+
+        self.deamon = True
+        self.running = True
+
+    def run(self) -> None:
+        while self.running:
+            data = b""
+            while not data:
+                data = self.sock.recv(16_384)
+
+            data = json.loads(data)
+
+            if DEBUG_MODE: print(data)
+
+            if "gameover" in data:
+                self.gameover = True
+                self.path = data["path"]
+
+                self.running = False
+
+
+def main():
+    print("Loading the firefox binary and webdriver...")
+    binary = FirefoxBinary(r"C:\Program Files\Mozilla Firefox\firefox.exe")
+
+    driver = webdriver.Firefox(firefox_binary=binary)
+
+    print("Forcing page update, login")
+
+    page = render_login()
     driver.get(page)
     print("waiting for user to input server details")
 
     new_page = wait_for_change(driver, page)
 
-    server, port, name = [_.split("=")[1] for _ in new_page.split("http://local/?")[1].split("&")]
+    server, port, name = [_.split("=")[1] for _ in new_page.split(
+        "file:///" + LOCAL_PATH + "/WIKIRaceRenderer.temp.html?"
+    )[1].split("&")]
 
     print("Forcing page update, waiting for server")
-    page = render("Please wait for the server to acknowledge your existence", f"connecting to {server}:{port}")
+    page = render_templated("Please wait for the server to acknowledge your existence",
+                            f"connecting to {server}:{port}")
     driver.get(page)
 
-    print("information from the client... server", server, "port", port)
+    print(f"information from the client, {server=} {port=} {name=}")
 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((server, int(port)))
 
-    time.sleep(2)
+    time.sleep(1)
 
     welcome_message = {
         "name": name,
@@ -213,9 +256,9 @@ def main():
         sys.exit(-1)
 
     print("Forcing page update, waiting for game to start")
-    page = render("Waiting for game to start",
-                  "When the game starts you will be shown a preview of your target<br>"
-                  "Then as soon as the first page loads your off!")
+    page = render_templated("Waiting for game to start",
+                            "When the game starts you will be shown a preview of your target<br>"
+                            "Then as soon as the first page loads your off!")
     driver.get(page)
 
     data = ""
@@ -229,7 +272,7 @@ def main():
     start_time = data["start_time"]
 
     print("Forcing page update, pre-game")
-    page = render("The game is about to begin", "Give the following page a good read, it is your target page")
+    page = render_templated("The game is about to begin", "Give the following page a good read, it is your target page")
     driver.get(page)
     time.sleep(10)
 
@@ -250,7 +293,7 @@ def main():
     time.sleep(start_time - current_time)
 
     print("Forcing page update, game pretence")
-    page = render("Prepare to start the game", "it will begin shortly")
+    page = render_templated("Prepare to start the game", "it will begin shortly")
     driver.get(page)
     time.sleep(5)
 
@@ -288,16 +331,15 @@ def main():
             driver.get(page)
 
     if wfw.gameover:
-        page = render("Wayyyy... you loose", "the winner took this path <br><br>" + "<br>".join(
-            [t.split("/wiki/")[1].replace("_", " ") for t in wfw.path])
-        )
+        page = render_templated("Wayyyy... you loose", "the winner took this path <br><br>" + "<br>".join(
+            [t.split("/wiki/")[1].replace("_", " ") for t in wfw.path]))
 
         driver.get(page)
         time.sleep(30)
         driver.close()
 
     else:
-        page = render("Congratulations! You win", "let us just inform the others...")
+        page = render_templated("Congratulations! You win", "let us just inform the others...")
         driver.get(page)
 
         client_socket.send(b"WIN")
@@ -307,26 +349,31 @@ def main():
         time.sleep(5)
 
         driver.close()
+        wfw.running = False
 
 
-print("Checking client hash...")
-
-with open(__file__, "rb") as file:
-    local_hash = hashlib.sha1(file.read()).hexdigest()
-
-remote_hash = requests.get("https://raw.githubusercontent.com/actorpus/WIKIraces/main/client_hash").text.strip()
-
-if local_hash != remote_hash:
-    print(f"Bad Client Hash, {local_hash=} {remote_hash=}")
-    req = requests.get("https://raw.githubusercontent.com/actorpus/WIKIraces/main/WIKIraces.py")
-
-    with open(__file__, "w") as file:
-        file.write(req.text)
-
-    sys.exit()
+if DEBUG_MODE:
+    print("Debug mode enabled, skipping update")
 
 else:
-    print("Client chilling, continuing as usual")
+    print("Checking client hash...")
+
+    with open(__file__, "rb") as file:
+        local_hash = hashlib.sha1(file.read()).hexdigest()
+
+    remote_hash = requests.get(UPDATE_SERVER + "client_hash").text.strip()
+
+    if local_hash != remote_hash:
+        print(f"Bad Client Hash, {local_hash=} {remote_hash=}")
+        req = requests.get(UPDATE_SERVER + "WIKIRace.py")
+
+        with open(__file__, "w") as file:
+            file.write(req.text)
+
+        sys.exit()
+
+    else:
+        print("Client chilling, continuing as usual")
 
 if __name__ == '__main__':
     main()
