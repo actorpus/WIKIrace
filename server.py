@@ -40,7 +40,7 @@ class Client(threading.Thread):
         self.sock.send(json.dumps({
             "start_point": start,
             "end_point": end,
-            "start_time": t + 30
+            "start_time": t + 20
         }).encode())
 
     def broadcast_win(self, winning_path):
