@@ -26,7 +26,7 @@ import struct
 # enable debug mode if you plan on changing anything but want default settings
 # enable dumb dumb mode if your running at school
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 DUMB_DUMB_MODE = False
 UPDATE_SERVER = "https://raw.githubusercontent.com/actorpus/WIKIrace/main/"
 LOCAL_PATH = sys.path[0].replace("\\", "/")
@@ -79,7 +79,6 @@ if DUMB_DUMB_MODE:
 
     with open(LOCAL_PATH + "/cert", "w") as file:
         file.write(cacert)
-
 
 try:
     import selenium
@@ -170,20 +169,16 @@ def render_templated(heading, content):
 def render_login():
     web_page = """
 <style>
-    body {
-        background-color: rgb(220 220 220);
-    }
-
-    h1 {
+    .divy h1 {
         margin: 0 0 8px 0;
     }
 
-    table {
+    .divy table {
         width: 100%;
         border-collapse: collapse;
     }
 
-    div {
+    .divy {
         padding: 32px;
         background-color: white;
         border: black 1px solid;
@@ -193,8 +188,53 @@ def render_login():
         top: 50%;
         transform: translate(-50%, -50%)
     }
+
+    body {
+        background-color: grey;
+    }
+
+    .background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+    }
+
+    .background img {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        transition: opacity 1s ease-in-out;
+    }
+
+    .background img.active {
+        opacity: 0.2;
+    }
 </style>
-<div>
+<div class="background">
+    <img src="http://static.wikirace.actorp.us/background_1.PNG" alt="Image 1">
+    <img src="http://static.wikirace.actorp.us/background_2.PNG" alt="Image 2">
+    <img src="http://static.wikirace.actorp.us/background_3.PNG" alt="Image 3">
+    <img src="http://static.wikirace.actorp.us/background_4.PNG" alt="Image 4">
+    <img src="http://static.wikirace.actorp.us/background_5.PNG" alt="Image 5">
+</div>
+<script>
+    const images = document.querySelectorAll('.background img');
+    let index = Math.floor(Math.random() * images.length);
+
+    images[index].classList.add('active');
+
+    setInterval(() => {
+        images[index].classList.remove('active');
+        index = (index + 1) % images.length;
+        images[index].classList.add('active');
+    }, 5000);
+</script>
+<div class="divy">
     <h1>WIKIRace</h1>
     <form style="align-content: center">
         <table>
@@ -203,7 +243,7 @@ def render_login():
                     <label for="server">Server IP:</label>
                 </td>
                 <td>
-                    <input type="text" name="server" id="server" placeholder="192.168.56.7" value="169.254.217.82"><br>
+                    <input type="text" name="server" id="server" placeholder="server.wikirace.actorp.us" value="server.wikirace.actorp.us">
                 </td>
             </tr>
             <tr>
@@ -211,7 +251,15 @@ def render_login():
                     <label for="port">Server Port:</label>
                 </td>
                 <td>
-                    <input type="text" name="port" id="port" placeholder="37126" value="37126"><br>
+                    <input type="text" name="port" id="port" placeholder="37126" value="37126">
+                </td>
+            </tr>
+            <tr id="password_row" style="display:none">
+                <td>
+                    <label for="password">Server Password:</label>
+                </td>
+                <td>
+                    <input type="password" name="password" id="password">
                 </td>
             </tr>
             <tr>
@@ -219,17 +267,32 @@ def render_login():
                     <label for="name">Name:</label>
                 </td>
                 <td>
-                    <input type="text" name="name" id="name" placeholder="Joe"><br>
+                    <input type="text" name="name" id="name" required maxlength="16" minlength="3">
                 </td>
             </tr>
             <tr>
-                <td></td>
+                <td>
+                    <label for="password_tick">Password </label>
+                    <input type="checkbox" name="password_tick" id="password_tick">
+                </td>
                 <td>
                     <button type="submit">Submit</button>
                 </td>
             </tr>
         </table>
     </form>
+    <script>
+        const passwordToggle = document.querySelector('#password_tick');
+        const passwordRow = document.querySelector('#password_row');
+
+        passwordToggle.addEventListener('change', () => {
+            if (passwordToggle.checked) {
+                passwordRow.style.display = 'table-row';
+            } else {
+                passwordRow.style.display = 'none';
+            }
+        });
+    </script>
 </div>
 """.replace("\r\n", "").replace("\n", "").replace("    ", "")
 
@@ -278,6 +341,8 @@ def main():
 
         driver = webdriver.Firefox(firefox_binary=binary)
 
+    driver.maximize_window()
+
     print("Forcing page update, login")
 
     page = render_login()
@@ -286,13 +351,15 @@ def main():
 
     new_page = wait_for_change(driver, page)
 
-    server, port, name = [_.split("=")[1] for _ in new_page.split(
+    server, port, password, name, _ = [_.split("=")[1] for _ in new_page.split(
         "file:///" + LOCAL_PATH + "/WIKIRaceRenderer.temp.html?"
     )[1].split("&")]
 
+    password = hashlib.sha1(password.encode()).digest()
+
     print("Forcing page update, waiting for server")
     page = render_templated("Please wait for the server to acknowledge your existence",
-                            f"connecting to {server}:{port}")
+                            f"connecting to {name}@{server}:{port}#{password.hex()}")
     driver.get(page)
 
     print(f"information from the client, {server=} {port=} {name=}")
@@ -312,7 +379,7 @@ def main():
     while not data:
         data = client_socket.recv(1024)
 
-    if data != b"WELCOME":
+    if data != b"WLCM":
         print(data)
         print("bad server")
         driver.close()
