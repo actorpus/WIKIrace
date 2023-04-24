@@ -8,7 +8,7 @@ import struct
 
 
 # https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
-def RequestTimefromNtp(addr='0.de.pool.ntp.org'):
+def request_time_from_NTP(addr='0.de.pool.ntp.org'):
     REF_TIME_1970 = 2208988800  # Reference time
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     data = b'\x1b' + 47 * b'\0'
@@ -32,11 +32,7 @@ class Client(threading.Thread):
         self.path = []
         self.daemon = True
 
-    def start_message(self, start, end):
-        t = RequestTimefromNtp()
-
-        print("time were sending is", t + 30)
-
+    def start_message(self, start, end, t):
         self.sock.send(json.dumps({
             "start_point": start,
             "end_point": end,
@@ -118,8 +114,11 @@ def run_server(players: int):
     print("to")
     print(end["article"])
 
+    t = request_time_from_NTP()
+    print("time were sending is", t + 30)
+
     for con in clients:
-        con.start_message(start, end)
+        con.start_message(start, end, t)
 
     print("waiting for winner to transmit")
 

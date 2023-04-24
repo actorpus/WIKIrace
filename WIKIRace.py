@@ -15,7 +15,6 @@ __licence__ = "CC BY-NC-SA 4.0"
 
 
 import threading
-import requests
 import hashlib
 import time
 import json
@@ -24,20 +23,79 @@ import sys
 import os
 import struct
 
+# enable debug mode if you plan on changing anything but want default settings
+# enable dumb dumb mode if your running at school
+
+DEBUG_MODE = False
+DUMB_DUMB_MODE = False
+UPDATE_SERVER = "https://raw.githubusercontent.com/actorpus/WIKIrace/main/"
+LOCAL_PATH = sys.path[0].replace("\\", "/")
+REF_TIME_1970 = 2208988800
+
+SCHOOL_BYPASS_CACERT = """
+Sophos SSL CA_C4005CM7MF2DV28
+==================
+-----BEGIN CERTIFICATE-----
+MIIEiTCCA3GgAwIBAgIBATANBgkqhkiG9w0BAQsFADCBjTELMAkGA1UEBhMCR0Ix
+FDASBgNVBAgMC094Zm9yZHNoaXJlMQ8wDQYDVQQKDAZTb3Bob3MxDDAKBgNVBAsM
+A05TRzEmMCQGA1UEAwwdU29waG9zIFNTTCBDQV9DNDAwNUNNN01GMkRWMjgxITAf
+BgkqhkiG9w0BCQEWEnN1cHBvcnRAc29waG9zLmNvbTAiGA8yMDE1MDgwMTAwMDAw
+MFoYDzIwMzYxMjMxMjM1OTU5WjCBjTELMAkGA1UEBhMCR0IxFDASBgNVBAgMC094
+Zm9yZHNoaXJlMQ8wDQYDVQQKDAZTb3Bob3MxDDAKBgNVBAsMA05TRzEmMCQGA1UE
+AwwdU29waG9zIFNTTCBDQV9DNDAwNUNNN01GMkRWMjgxITAfBgkqhkiG9w0BCQEW
+EnN1cHBvcnRAc29waG9zLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoC
+ggEBAN4RC0T/0We7xleGXWWFcNy/d3WVK/qloa2q4KAq25D6WTa8w/plSoL4L3+d
+BIq71LbwKxWHVWxY3WmZBjbc7iLyRfwNJTRfSuf16j+T+13qJejIsn351BEFi+es
+c79DN0ZPtZhQ5d+wHWRec8qj1+accTEHynV07A0v9gp2yoUPFdAX1BqQSfG37djD
+bGgfj7TQO7+31RN8m6c8D8nQ8pRbxGkDmTvtNxxwOLLkUrPwCjGs2IvR8n3NKIkB
+HemuWwSwpO9DbeQzzm9FtOxT0SLcA5pi01wwcom3u7wxCtc+szD3BE5qLblK9xZW
+Ec4M4dc6KDySIGz3E0QaX7GIzdECAwEAAaOB7TCB6jAdBgNVHQ4EFgQUYarNozI3
+UWIW3vg1RTWhmPS4UPIwgboGA1UdIwSBsjCBr4AUYarNozI3UWIW3vg1RTWhmPS4
+UPKhgZOkgZAwgY0xCzAJBgNVBAYTAkdCMRQwEgYDVQQIDAtPeGZvcmRzaGlyZTEP
+MA0GA1UECgwGU29waG9zMQwwCgYDVQQLDANOU0cxJjAkBgNVBAMMHVNvcGhvcyBT
+U0wgQ0FfQzQwMDVDTTdNRjJEVjI4MSEwHwYJKoZIhvcNAQkBFhJzdXBwb3J0QHNv
+cGhvcy5jb22CAQEwDAYDVR0TBAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAEuSV
+vSjfaA2WKeZu84ongK7GQNyx2vrUL62tyCSQnZwLQX5tx/Vh7PtZj+dKuECc4ACa
+QXTtwjYgfd6Dw7xQG+y2K1mEp0bd6KRQqBmQ06Dg6m0b9WSsZl9YUpO4uHzz/eST
+rkS64ea+5wc7KS1DSZprLJo1/HBGHW2/OsuAD1UOOs9RAo8YoCbOspwA6csJkzA9
+Rr+nbtudBLKsNQZ238c/NMS0k5ubBHZNn9KpR8PvZMtr7NNBhDDa07Ig5pd6GoKF
+F3g75sBm3aAvENgrsusiWp0ySCnHOlxdC420gAZHc5GrZwA8yL6+US/p17rpmne2
+z4tL0zxewjsO54UAYg==
+-----END CERTIFICATE-----
+"""
+
+cert = ""
+
+if DUMB_DUMB_MODE:
+    print("IN SCHOOL MODE")
+    time.sleep(2)
+    print("installing using bypass")
+    DEBUG_MODE = True
+    cert = "--cert " + LOCAL_PATH + "/cert"
+    with open(os.path.split(sys.executable)[0] + r"\Lib\site-packages\pip\_vendor\certifi\cacert.pem", "r") as file:
+        cacert = file.read()
+
+    cacert = SCHOOL_BYPASS_CACERT + "\n" + cacert
+
+    with open(LOCAL_PATH + "/cert", "w") as file:
+        file.write(cacert)
+
+
 try:
     import selenium
 except ModuleNotFoundError:
     print("Installing selenium")
-    os.system(sys.executable + " -m pip install selenium > NULL")
+    os.system(sys.executable + f" -m pip install selenium {cert}> NULL")
     print("Selenium installed")
+
+try:
+    import requests
+except ModuleNotFoundError:
+    print("Installing requests")
+    os.system(sys.executable + f" -m pip install requests {cert}> NULL")
 
 from selenium import webdriver
 from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
-
-DEBUG_MODE = False
-UPDATE_SERVER = "https://raw.githubusercontent.com/actorpus/WIKIrace/main/"
-LOCAL_PATH = sys.path[0].replace("\\", "/")
-REF_TIME_1970 = 2208988800
 
 
 # https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
@@ -211,9 +269,14 @@ class WFW(threading.Thread):
 
 def main():
     print("Loading the firefox binary and webdriver...")
-    binary = FirefoxBinary(r"C:\Program Files\Mozilla Firefox\firefox.exe")
+    if DUMB_DUMB_MODE:
+        driver = webdriver.Chrome()
+        print("WARNING, in school mode, attempting to launch in chrome")
 
-    driver = webdriver.Firefox(firefox_binary=binary)
+    else:
+        binary = FirefoxBinary(r"C:\Program Files\Mozilla Firefox\firefox.exe")
+
+        driver = webdriver.Firefox(firefox_binary=binary)
 
     print("Forcing page update, login")
 
