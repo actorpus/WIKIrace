@@ -45,6 +45,7 @@ client waits for servers begin message
 |           | PATH  | int[1]      | path length                        |
 |           |       | string[128] | Path entry * for each item in path |
 | S -> C    | CONG  |             | Congratulations you win!           |
+
 client is assumed to be kicked from the server
 
 
@@ -54,4 +55,5 @@ client is assumed to be kicked from the server
 | S -> C    | LOSE  |             | you have lost, path to follow      |
 |           | PATH  | int[1]      | path length                        |
 |           |       | string[128] | Path entry * for each item in path |
+
 client is assumed to be kicked from the server 
