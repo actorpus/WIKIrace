@@ -97,17 +97,18 @@ from selenium import webdriver
 from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 
 
-# https://stackoverflow.com/questions/36500197/how-to-get-time-from-an-ntp-server
-def request_time_from_ntp(addr="0.de.pool.ntp.org"):
-    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    data = b'\x1b' + 47 * b'\0'
-    client.sendto(data, (addr, 123))
-    data, address = client.recvfrom(1024)
-    if data:
-        t = struct.unpack("!12I", data)[10]
-        t -= REF_TIME_1970
+def xor_bytes(bytes_1, bytes_2):
+    if len(bytes_2) < len(bytes_1):
+        bytes_1, bytes_2 = bytes_2, bytes_1
 
-    return t
+    return bytes(a ^ b for a, b in zip(bytes_1, bytes_2))
+
+
+def salt_and_hash(password, salt):
+    password = hashlib.sha256(password.encode()).digest()
+    password = xor_bytes(password, salt)
+    password = hashlib.sha256(password).digest()
+    return password
 
 
 def wait_for_change(driver, from_url):
@@ -243,7 +244,7 @@ def render_login():
                     <label for="server">Server IP:</label>
                 </td>
                 <td>
-                    <input type="text" name="server" id="server" placeholder="server.wikirace.actorp.us" value="server.wikirace.actorp.us">
+                    <input type="text" name="server" id="server" placeholder="server.wikirace.actorp.us" value="192.168.56.1">
                 </td>
             </tr>
             <tr>
@@ -251,7 +252,7 @@ def render_login():
                     <label for="port">Server Port:</label>
                 </td>
                 <td>
-                    <input type="text" name="port" id="port" placeholder="37126" value="37126">
+                    <input type="text" name="port" id="port" placeholder="37126" value="16124">
                 </td>
             </tr>
             <tr id="password_row" style="display:none">
@@ -302,32 +303,43 @@ def render_login():
     return f"file:///{LOCAL_PATH}/WIKIRaceRenderer.temp.html"
 
 
-class WFW(threading.Thread):
+class Background(threading.Thread):
     def __init__(self, sock):
-        super(WFW, self).__init__()
-
-        self.sock = sock
-        self.gameover = False
-        self.path = []
-
+        super(Background, self).__init__()
         self.deamon = True
+
+        self._sock: socket.SocketType = sock
+        self._last_heartbeat = time.time()
+
         self.running = True
+
+    def _recv(self, data):
+        if data == b"HART":
+            self._last_heartbeat = time.time()
+            print("Server acknowledges heartbeat")
+            return
+
+        print("bad packet, ", data)
 
     def run(self) -> None:
         while self.running:
-            data = b""
-            while not data:
-                data = self.sock.recv(16_384)
+            # only attempt to recv for 1 seconds
+            self._sock.settimeout(1)
 
-            data = json.loads(data)
+            try:
+                self._recv(self._sock.recv(4))
 
-            if DEBUG_MODE: print(data)
+            except socket.timeout:
+                ...
 
-            if "gameover" in data:
-                self.gameover = True
-                self.path = data["path"]
+            self._sock.settimeout(None)
 
-                self.running = False
+            t = time.time()
+
+            if t > self._last_heartbeat + 10:
+                print("Heartbeat out of date, resending")
+                self._sock.send(b"HART")
+                self._last_heartbeat = t
 
 
 def main():
@@ -351,37 +363,68 @@ def main():
 
     new_page = wait_for_change(driver, page)
 
-    server, port, password, name, _ = [_.split("=")[1] for _ in new_page.split(
-        "file:///" + LOCAL_PATH + "/WIKIRaceRenderer.temp.html?"
-    )[1].split("&")]
+    data = dict([_.split("=") for _ in
+                 new_page.split("file:///" + LOCAL_PATH + "/WIKIRaceRenderer.temp.html?")[1].split("&")])
 
-    password = hashlib.sha1(password.encode()).digest()
+    server = data["server"]
+    port = int(data["port"])
+    name = data["name"][:16].ljust(3, "A").ljust(16, "_")
+
+    password = "default"
+
+    if "password_tick" in data:
+        password = data["password"]
 
     print("Forcing page update, waiting for server")
     page = render_templated("Please wait for the server to acknowledge your existence",
-                            f"connecting to {name}@{server}:{port}#{password.hex()}")
+                            f"connecting to <small>{name.replace('_', '')}@</small><b>{server}</b>:{port}<small>#{password}</small>")
     driver.get(page)
 
-    print(f"information from the client, {server=} {port=} {name=}")
+    print(f"information from the client, {server=} {port=} name={name.replace('_', '')} {password=}")
 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((server, int(port)))
 
     time.sleep(1)
 
-    welcome_message = {
-        "name": name,
-    }
+    client_socket.send(b"JOIN")
 
-    client_socket.send(json.dumps(welcome_message).encode())
+    data = client_socket.recv(4)
 
-    data = ""
-    while not data:
-        data = client_socket.recv(1024)
+    if data != b"CNTU":
+        page = render_templated("Whoops!",
+                                f"Bad server")
+        driver.get(page)
+        time.sleep(5)
+        driver.close()
+        sys.exit(-1)
 
-    if data != b"WLCM":
-        print(data)
-        print("bad server")
+    data = client_socket.recv(1)
+
+    server_has_password = bool(data[0])
+
+    if server_has_password:
+        salt = client_socket.recv(32)
+
+        print(f"Server has a password, using {salt=}")
+
+    client_socket.send(b"NAME")
+    client_socket.send(name.encode())
+
+    if server_has_password:
+        password = salt_and_hash(password, salt)
+        client_socket.send(b"PSWD")
+        client_socket.send(password)
+
+    client_socket.send(b"REDY")
+
+    data = client_socket.recv(4)
+
+    if data != b"WAIT":
+        page = render_templated("Whoops!",
+                                f"Server said nope.<br>Probably a bad password.")
+        driver.get(page)
+        time.sleep(5)
         driver.close()
         sys.exit(-1)
 
@@ -391,95 +434,102 @@ def main():
                             "Then as soon as the first page loads your off!")
     driver.get(page)
 
-    data = ""
-    while not data:
-        data = client_socket.recv(1024)
+    print("Connected to server, starting heartbeat")
+    # move all socket stuff to a separate thread, now only heartbeat, start, and end.
+    background = Background(client_socket)
+    background.start()
 
-    data = json.loads(data.decode())
+    input()
 
-    start = data["start_point"]
-    end = data["end_point"]
-    start_time = data["start_time"]
-
-    print("Forcing page update, pre-game")
-    page = render_templated("The game is about to begin", "Give the following page a good read, it is your target page")
-    driver.get(page)
-    time.sleep(10)
-
-    print("Forcing page update, search, endpoint")
-    page = f"https://en.wikipedia.org/wiki/Special:Search?search={end['article'].replace(' ', '_')}"
-    driver.get(page)
-    time.sleep(5)
-    end = driver.current_url
-
-    print("starting second thread")
-    wfw = WFW(client_socket)
-    wfw.start()
-
-    print("Requesting time")
-    current_time = request_time_from_ntp()
-    print("Time from server", current_time)
-    print("Waiting for start time! approx", start_time - current_time, "seconds")
-    time.sleep(start_time - current_time)
-
-    print("Forcing page update, game pretence")
-    page = render_templated("Prepare to start the game", "it will begin shortly")
-    driver.get(page)
-    time.sleep(5)
-
-    page = f"https://en.wikipedia.org/wiki/Special:Search?search={start['article'].replace(' ', '_')}"
-    driver.get(page)
-
-    time.sleep(1)
-    start = driver.current_url
-
-    current = wait_for_change(driver, page)
-    page = driver.current_url
-
-    path = [page]
-
-    while (current != end) and not wfw.gameover:
-        while not wfw.gameover:
-            time.sleep(0.1)
-
-            new_page = driver.current_url
-            if new_page == page:
-                continue
-
-            if new_page == "about:blank":
-                continue
-
-            current = new_page
-            break
-
-        page = driver.current_url
-
-        path.append(page)
-
-        if "://en.wikipedia.org/wiki" not in page:
-            page = start
-            driver.get(page)
-
-    if wfw.gameover:
-        page = render_templated("Wayyyy... you loose", "the winner took this path <br><br>" + "<br>".join(
-            [t.split("/wiki/")[1].replace("_", " ") for t in wfw.path]))
-
-        driver.get(page)
-        time.sleep(30)
-        driver.close()
-
-    else:
-        page = render_templated("Congratulations! You win", "let us just inform the others...")
-        driver.get(page)
-
-        client_socket.send(b"WIN")
-        time.sleep(1)
-        client_socket.send(json.dumps(path).encode())
-
-        time.sleep(5)
-
-        driver.close()
-        wfw.running = False
+    # data = ""
+    # while not data:
+    #     data = client_socket.recv(1024)
+    #
+    # data = json.loads(data.decode())
+    #
+    # start = data["start_point"]
+    # end = data["end_point"]
+    # start_time = data["start_time"]
+    #
+    # print("Forcing page update, pre-game")
+    # page = render_templated("The game is about to begin", "Give the following page a good read, it is your target page")
+    # driver.get(page)
+    # time.sleep(10)
+    #
+    # print("Forcing page update, search, endpoint")
+    # page = f"https://en.wikipedia.org/wiki/Special:Search?search={end['article'].replace(' ', '_')}"
+    # driver.get(page)
+    # time.sleep(5)
+    # end = driver.current_url
+    #
+    # print("starting second thread")
+    # wfw = WFW(client_socket)
+    # wfw.start()
+    #
+    # print("Requesting time")
+    # current_time = request_time_from_ntp()
+    # print("Time from server", current_time)
+    # print("Waiting for start time! approx", start_time - current_time, "seconds")
+    # time.sleep(start_time - current_time)
+    #
+    # print("Forcing page update, game pretence")
+    # page = render_templated("Prepare to start the game", "it will begin shortly")
+    # driver.get(page)
+    # time.sleep(5)
+    #
+    # page = f"https://en.wikipedia.org/wiki/Special:Search?search={start['article'].replace(' ', '_')}"
+    # driver.get(page)
+    #
+    # time.sleep(1)
+    # start = driver.current_url
+    #
+    # current = wait_for_change(driver, page)
+    # page = driver.current_url
+    #
+    # path = [page]
+    #
+    # while (current != end) and not wfw.gameover:
+    #     while not wfw.gameover:
+    #         time.sleep(0.1)
+    #
+    #         new_page = driver.current_url
+    #         if new_page == page:
+    #             continue
+    #
+    #         if new_page == "about:blank":
+    #             continue
+    #
+    #         current = new_page
+    #         break
+    #
+    #     page = driver.current_url
+    #
+    #     path.append(page)
+    #
+    #     if "://en.wikipedia.org/wiki" not in page:
+    #         page = start
+    #         driver.get(page)
+    #
+    # if wfw.gameover:
+    #     page = render_templated("Wayyyy... you loose", "the winner took this path <br><br>" + "<br>".join(
+    #         [t.split("/wiki/")[1].replace("_", " ") for t in wfw.path]))
+    #
+    #     driver.get(page)
+    #     time.sleep(30)
+    #     driver.close()
+    #
+    # else:
+    #     page = render_templated("Congratulations! You win", "let us just inform the others...")
+    #     driver.get(page)
+    #
+    #     client_socket.send(b"WIN")
+    #     time.sleep(1)
+    #     client_socket.send(json.dumps(path).encode())
+    #
+    #     time.sleep(5)
+    #
+    #     driver.close()
+    #     wfw.running = False
 
 
 if DEBUG_MODE:

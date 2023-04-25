@@ -1,14 +1,14 @@
 ## connection detail
 
-| direction | type | data       | meaning                                                                                                     |
-|-----------|------|------------|-------------------------------------------------------------------------------------------------------------|
-| C -> S    | JOIN |            | request space in lobby                                                                                      |
-| S -> C    | CONT | bytes[1]   | you have been given a place in the lobby, follow with information. if data[1] is 0x01 server has a password |
-|           | SALT | bytes[32]  | salt to use with the password                                                                               | 
-| C -> S    | NAME | string[16] | your username (16 chars)                                                                                    |
-|           | PSWD | bytes[32]  | servers password (sha256 hashed and salted)                                                                 |
-|           | JOIN |            | join lobby, am now waiting                                                                                  |
-| S -> C    | WAIT |            | waiting for game to start                                                                                   |
+| direction | type | data       | meaning                                                                                                  |
+|-----------|------|------------|----------------------------------------------------------------------------------------------------------|
+| C -> S    | JOIN |            | request space in lobby                                                                                   |
+| S -> C    | CNTU | bytes[1]   | you have been given a place in the lobby, follow with information. if data is 0x01 server has a password |
+|           |      | bytes[32]  | salt to use with the password                                                                            | 
+| C -> S    | NAME | string[16] | your username (16 chars)                                                                                 |
+|           | PSWD | bytes[32]  | servers password (sha256 hashed and salted)                                                              |
+|           | REDY |            | join lobby, am now waiting                                                                               |
+| S -> C    | WAIT |            | waiting for game to start                                                                                |
 
 client is now waiting on the server.
 
