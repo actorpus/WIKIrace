@@ -113,21 +113,17 @@ def salt_and_hash(password, salt):
 
 def wait_for_change(driver, from_url):
     page = from_url
-    if DEBUG_MODE: print("looking for deviations from", page)
 
     while True:
         time.sleep(1)
 
         new_page = driver.current_url
-        if DEBUG_MODE: print("looking at", new_page)
 
         if new_page == page:
             continue
 
         if new_page == "about:blank":
             continue
-
-        if DEBUG_MODE: print("deviation detected")
 
         return new_page
 
@@ -310,16 +306,57 @@ class Background(threading.Thread):
 
         self._sock: socket.SocketType = sock
         self._last_heartbeat = time.time()
+        self._server_last_heartbeat = time.time()
+        self._sync = False
+        self._sync_time = 0
+        self._server_time = 0
+        self._game_start = False
 
         self.running = True
 
+    def wait_for_game_start(self):
+        while not self._game_start:
+            ...
+
+        return
+
     def _recv(self, data):
         if data == b"HART":
-            self._last_heartbeat = time.time()
-            print("Server acknowledges heartbeat")
+            self._server_last_heartbeat = time.time()
+            print(f" [ \033[0;35mS\033[0;0m ] Server has acknowledged our existence")
+
             return
 
-        print("bad packet, ", data)
+        if data == b"TMPK":
+            print(f" [ \033[0;35mS\033[0;0m ] TimeKeep received")
+            self._sync_time = time.time()
+            t = self._sock.recv(6)
+            t = int.from_bytes(t, 'big') / (2 ** 16)
+            self._server_time = t
+            self._sync = True
+
+            return
+
+        if data == b"STRT":
+            print(f" [ \033[0;35mS\033[0;0m ] Server has started the game")
+            self._game_start = True
+            return
+
+        print(f" [ \033[0;35mS\033[0;0m ] Client ({self.name}) sent a bad packet, {data=}")
+
+    def sync_time(self):
+        start = time.time()
+
+        self._sock.send(b"TMPK")
+
+        while not self._sync:
+            time.sleep(0.1)
+
+        ping = (self._sync_time - start) / 2
+
+        self._server_time += ping
+
+        return self._server_time - start
 
     def run(self) -> None:
         while self.running:
@@ -332,21 +369,26 @@ class Background(threading.Thread):
             except socket.timeout:
                 ...
 
+            except ConnectionResetError:
+                print(f" \033[0;31m[ \033[0;35mS\033[0;0m \033[0;31m]\033[0;0m Client ({self.name}) has closed there socket, assuming the worst")
+                self.running = False
+                continue
+
             self._sock.settimeout(None)
 
             t = time.time()
 
             if t > self._last_heartbeat + 10:
-                print("Heartbeat out of date, resending")
+                print(f" [ \033[0;35mS\033[0;0m ] HeartBeat out of date, sending new one")
                 self._sock.send(b"HART")
                 self._last_heartbeat = t
 
 
 def main():
-    print("Loading the firefox binary and webdriver...")
+    print(" [ \033[0;36mM\033[0;0m ] Loading the firefox binary and webdriver...")
     if DUMB_DUMB_MODE:
         driver = webdriver.Chrome()
-        print("WARNING, in school mode, attempting to launch in chrome")
+        print(" [ \033[0;36mM\033[0;0m ] WARNING, in school mode, attempting to launch in chrome")
 
     else:
         binary = FirefoxBinary(r"C:\Program Files\Mozilla Firefox\firefox.exe")
@@ -355,11 +397,11 @@ def main():
 
     driver.maximize_window()
 
-    print("Forcing page update, login")
+    print(" [ \033[0;36mM\033[0;0m ] Forcing page update, login")
 
     page = render_login()
     driver.get(page)
-    print("waiting for user to input server details")
+    print(" [ \033[0;36mM\033[0;0m ] waiting for user to input server details")
 
     new_page = wait_for_change(driver, page)
 
@@ -375,12 +417,12 @@ def main():
     if "password_tick" in data:
         password = data["password"]
 
-    print("Forcing page update, waiting for server")
+    print(" [ \033[0;36mM\033[0;0m ] Forcing page update, waiting for server")
     page = render_templated("Please wait for the server to acknowledge your existence",
                             f"connecting to <small>{name.replace('_', '')}@</small><b>{server}</b>:{port}<small>#{password}</small>")
     driver.get(page)
 
-    print(f"information from the client, {server=} {port=} name={name.replace('_', '')} {password=}")
+    print(f" [ \033[0;36mM\033[0;0m ] information from the client, {server=} {port=} name={name.replace('_', '')} {password=}")
 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((server, int(port)))
@@ -406,7 +448,7 @@ def main():
     if server_has_password:
         salt = client_socket.recv(32)
 
-        print(f"Server has a password, using {salt=}")
+        print(f" [ \033[0;36mM\033[0;0m ] Server has a password, using {salt=}")
 
     client_socket.send(b"NAME")
     client_socket.send(name.encode())
@@ -428,18 +470,24 @@ def main():
         driver.close()
         sys.exit(-1)
 
-    print("Forcing page update, waiting for game to start")
+    print(" [ \033[0;36mM\033[0;0m ] Forcing page update, waiting for game to start")
     page = render_templated("Waiting for game to start",
                             "When the game starts you will be shown a preview of your target<br>"
                             "Then as soon as the first page loads your off!")
     driver.get(page)
 
-    print("Connected to server, starting heartbeat")
+    print(" [ \033[0;36mM\033[0;0m ] Connected to server, starting heartbeat")
     # move all socket stuff to a separate thread, now only heartbeat, start, and end.
     background = Background(client_socket)
     background.start()
 
-    input()
+    print(" [ \033[0;36mM\033[0;0m ] Waiting for server to start the game")
+    background.wait_for_game_start()
+
+    print(" [ \033[0;36mM\033[0;0m ] Server has started, syncing times")
+    # stalling
+    difference = background.sync_time()
+    print("time difference,", difference)
 
     # data = ""
     # while not data:
@@ -533,10 +581,10 @@ def main():
 
 
 if DEBUG_MODE:
-    print("Debug mode enabled, skipping update")
+    print(" [ \033[0;32mG\033[0;0m ] Debug mode enabled, skipping update")
 
 else:
-    print("Checking client hash...")
+    print(" [ \033[0;32mG\033[0;0m ] Checking client hash...")
 
     with open(__file__, "rb") as file:
         local_hash = hashlib.sha1(file.read()).hexdigest()
@@ -544,7 +592,7 @@ else:
     remote_hash = requests.get(UPDATE_SERVER + "client_hash").text.strip()
 
     if local_hash != remote_hash:
-        print(f"Bad Client Hash, {local_hash=} {remote_hash=}")
+        print(f" [ \033[0;32mG\033[0;0m ] Bad Client Hash, {local_hash=} {remote_hash=}")
         req = requests.get(UPDATE_SERVER + "WIKIRace.py")
 
         with open(__file__, "w") as file:
@@ -553,7 +601,7 @@ else:
         sys.exit()
 
     else:
-        print("Client chilling, continuing as usual")
+        print(" [ \033[0;32mG\033[0;0m ] Client chilling, continuing as usual")
 
 if __name__ == '__main__':
     main()

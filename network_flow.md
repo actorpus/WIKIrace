@@ -22,12 +22,12 @@ client is now waiting on the server.
 
 ## game start
 
-| direction | type  | data | meaning                                 |
-|-----------|-------|------|-----------------------------------------|
-| S -> C    | STRT  |      | game is starting please sync clocks     |
-| C -> S    | TMPK  |      | request servers time                    |
-| S -> C    | TMPK  |      | servers time (client uses ping to sync) |
-| C -> S    | WAIT  |      | time synced, waiting                    | 
+| direction | type  | data     | meaning                                 |
+|-----------|-------|----------|-----------------------------------------|
+| S -> C    | STRT  |          | game is starting please sync clocks     |
+| C -> S    | TMPK  |          | request servers time                    |
+| S -> C    | TMPK  | bytes[6] | servers time (client uses ping to sync) |
+| C -> S    | WAIT  |          | time synced, waiting                    | 
 
 client waits for servers begin message
 

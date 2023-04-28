@@ -34,7 +34,6 @@ class Client(threading.Thread):
         self.name = f"CLIENT{random.randbytes(5).hex()}"
         self.has_won = False
         self.alive = True
-        self._send_backlog = []
         self._last_heartbeat = time.time()
         self._salt = random.randbytes(32)
         self._authorised = False
@@ -85,8 +84,10 @@ class Client(threading.Thread):
 
         if data == b"REDY":
             if self._server_has_password and not self._authorised:
-                print(f" [ \033[0;35mC\033[0;0m ] Client ({self.name}) tried to join the game with inadequate authorisation")
+                print(f" \033[0;31m[ \033[0;35mC\033[0;0m \033[0;31m]\033[0;0m Client ({self.name}) tried to join the game with inadequate authorisation")
                 self.alive = False
+                self._sock.send(b"PISS")
+                self._sock.close()
                 return
 
             self.is_waiting = True
@@ -99,7 +100,16 @@ class Client(threading.Thread):
             self._sock.send(b"HART")
             return
 
-        print("bad packet, ", data)
+        if data == b"TMPK":
+            t = time.time()
+            t = int(t * 2 ** 16).to_bytes(6, 'big')
+
+            self._sock.send(b"TMPK")
+            self._sock.send(t)
+
+            return
+
+        print(f" [ \033[0;35mC\033[0;0m ] Client ({self.name}) sent a bad packet, {data=}")
 
     def run(self) -> None:
         while self.alive:
@@ -108,6 +118,7 @@ class Client(threading.Thread):
 
             try:
                 self._recv(self._sock.recv(4))
+                # this call could close the socket, no socket calls until while loop ends.
 
             except socket.timeout:
                 ...
@@ -116,13 +127,12 @@ class Client(threading.Thread):
                 print(f" \033[0;31m[ \033[0;35mC\033[0;0m \033[0;31m]\033[0;0m Client ({self.name}) has closed there socket, assuming the worst")
                 self.alive = False
 
-            self._sock.settimeout(None)
-
-            for item in self._send_backlog:
-                self._sock.send(item)
-
-    def rebind(self):
+    def rebind(self, _):
         raise NotImplementedError
+
+    def broadcast_start(self, start, end):
+        self._sock.send(b"STRT")
+
 
 ip, port = socket.gethostbyname(socket.gethostname()), 16124
 server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -134,24 +144,39 @@ print(f"server running on {ip}:{port}")
 def run_server(players: int):
     clients = {}
 
-    for i in range(players):
-        connection, client = server_sock.accept()
+    waiting = True
+    while waiting:
+        if len(clients) < players:
+            server_sock.settimeout(1)
 
-        print(f" [ \033[0;36mS\033[0;0m ] New connection from {client[0]}:{client[1]} {i + 1}/{players}")
+            try:
+                connection, client = server_sock.accept()
+            except socket.timeout:
+                continue
+            else:
+                server_sock.settimeout(None)
 
-        if client in clients:
-            clients[client].rebind(connection)
-            continue
+                print(f" [ \033[0;36mS\033[0;0m ] New connection from {client[0]}:{client[1]} {len(clients) + 1}/{players}")
 
-        c = Client(connection, has_password=True, password="password")
+                if client in clients:
+                    clients[client].rebind(connection)
+                    continue
 
-        clients[client] = c
+                c = Client(connection, has_password=True, password="password")
+                clients[client] = c
+                c.start()
 
-        c.start()
+                # allow time for client to properly start up, potential for premature abandonment
+                time.sleep(1)
 
-    while not all([clients[client].is_waiting for client in clients]):
-        print(f" [ \033[0;36mS\033[0;0m ] Waiting for all clients to authorise")
-        time.sleep(1)
+        if all(clients[client].is_waiting for client in clients):
+            waiting = False
+
+        else:
+            for bad_client in [client for client in clients if not clients[client].alive]:
+                print(f" [ \033[0;36mS\033[0;0m ] Abandoning {bad_client[0]}:{bad_client[1]}")
+                del clients[bad_client]
+                print(f" [ \033[0;36mS\033[0;0m ] Waiting for connection...  {len(clients)}/{players}")
 
     print(f" [ \033[0;36mS\033[0;0m ] All clients now authorised, starting game")
     print(f" [ \033[0;36mS\033[0;0m ] Picking starting and ending points")
@@ -163,10 +188,13 @@ def run_server(players: int):
     start = random.choice(top_views)
     end = random.choice(top_views)
 
-    print("         START: ", start["article"])
-    print("         END:   ", end["article"])
+    print("     ├ START: ", start["article"])
+    print("     └ END:   ", end["article"])
 
     time.sleep(10)
+
+    for client in clients:
+        clients[client].broadcast_start(start["article"], end["article"])
 
 server_for = int(input("server for? \n> "))
 run_server(server_for)
